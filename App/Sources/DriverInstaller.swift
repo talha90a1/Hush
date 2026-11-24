@@ -20,8 +20,11 @@ enum DriverInstaller {
         return version(of: installedURL) != mine
     }
 
+    /// Reads Info.plist directly: Bundle caches by identifier, and the bundled and
+    /// installed drivers share one, so Bundle(url:) can return nothing for the second.
     private static func version(of driver: URL) -> String? {
-        Bundle(url: driver)?.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        let plist = driver.appendingPathComponent("Contents/Info.plist")
+        return (NSDictionary(contentsOf: plist)?["CFBundleVersion"]) as? String
     }
 
     static var isInstalled: Bool { FileManager.default.fileExists(atPath: installedURL.path) }
