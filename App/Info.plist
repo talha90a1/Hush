@@ -28,6 +28,14 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/talha90a1/Hush/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>kStyQER6Lg3m4SGWQygpH/2HLij22wxU+txQYVyt+VE=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>© Aliasviejo and talha90a1. MIT License.</string>
 </dict>

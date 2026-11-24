@@ -62,16 +62,16 @@ enum ScheduleTest {
     }
 
     static func zoneTable() {
-        let table = "# comment\nSA\t+2438+04643\tAsia/Riyadh\nUS\t+404251-0740023\tAmerica/New_York\tEastern (most areas)\n"
-        let riyadh = TimeZoneLocation.coordinate(for: "Asia/Riyadh", in: table)
-        check(riyadh.map { abs($0.latitude - 24.633) < 0.01 && abs($0.longitude - 46.717) < 0.01 } == true, "Riyadh coordinates")
-        let newYork = TimeZoneLocation.coordinate(for: "America/New_York", in: table)
-        check(newYork.map { abs($0.latitude - 40.714) < 0.01 && abs($0.longitude + 74.006) < 0.01 } == true, "New York with seconds")
+        let table = "# comment\nGB\t+513030-0000731\tEurope/London\nJP\t+3541+13946\tAsia/Tokyo\n"
+        let tokyo = TimeZoneLocation.coordinate(for: "Asia/Tokyo", in: table)
+        check(tokyo.map { abs($0.latitude - 35.683) < 0.01 && abs($0.longitude - 139.767) < 0.01 } == true, "Tokyo coordinates")
+        let london = TimeZoneLocation.coordinate(for: "Europe/London", in: table)
+        check(london.map { abs($0.latitude - 51.508) < 0.01 && abs($0.longitude + 0.125) < 0.01 } == true, "London with seconds")
         check(TimeZoneLocation.coordinate(for: "Mars/Olympus", in: table) == nil, "unknown zone")
         check(TimeZoneLocation.parse("+٢٤٣٨+٠٤٦٤٣") == nil, "non-ASCII digits rejected, not crashed on")
         // The system's own table: a zone it lists, and an old name it doesn't
         // (macOS reports India as Asia/Calcutta; zone.tab only has Asia/Kolkata).
-        check(TimeZoneLocation.location(of: "Asia/Riyadh") != nil, "system zone.tab")
+        check(TimeZoneLocation.location(of: "Asia/Tokyo") != nil, "system zone.tab")
         let kolkata = TimeZoneLocation.location(of: "Asia/Calcutta")
         check(kolkata.map { abs($0.latitude - 22.53) < 0.1 && abs($0.longitude - 88.37) < 0.1 } == true, "old zone name")
         check(TimeZoneLocation.location(of: "Mars/Olympus") == nil, "unknown system zone")
@@ -95,19 +95,19 @@ enum ScheduleTest {
     }
 
     static func schedule() {
-        let riyadh = TimeZone(identifier: "Asia/Riyadh")!
-        let coordinate = CLLocationCoordinate2D(latitude: 24.633, longitude: 46.717)
+        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+        let coordinate = CLLocationCoordinate2D(latitude: 35.683, longitude: 139.767)
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = riyadh
+        calendar.timeZone = tokyo
         func at(_ hour: Int, _ minute: Int) -> Date {
             calendar.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: hour, minute: minute))!
         }
-        // Riyadh, 24 Nov: sunrise about 06:20, sunset about 17:05.
-        check(NightSchedule.sun.isNight(at: at(5, 0), timeZone: riyadh, coordinate: coordinate), "before sunrise")
-        check(!NightSchedule.sun.isNight(at: at(12, 0), timeZone: riyadh, coordinate: coordinate), "noon")
-        check(!NightSchedule.sun.isNight(at: at(16, 50), timeZone: riyadh, coordinate: coordinate), "just before sunset")
-        check(NightSchedule.sun.isNight(at: at(17, 30), timeZone: riyadh, coordinate: coordinate), "after sunset")
-        check(NightSchedule.sun.isNight(at: at(23, 30), timeZone: riyadh, coordinate: coordinate), "late night")
+        // Tokyo, 24 Nov: sunrise about 06:20, sunset about 16:30.
+        check(NightSchedule.sun.isNight(at: at(5, 0), timeZone: tokyo, coordinate: coordinate), "before sunrise")
+        check(!NightSchedule.sun.isNight(at: at(12, 0), timeZone: tokyo, coordinate: coordinate), "noon")
+        check(!NightSchedule.sun.isNight(at: at(16, 10), timeZone: tokyo, coordinate: coordinate), "just before sunset")
+        check(NightSchedule.sun.isNight(at: at(16, 50), timeZone: tokyo, coordinate: coordinate), "after sunset")
+        check(NightSchedule.sun.isNight(at: at(23, 30), timeZone: tokyo, coordinate: coordinate), "late night")
         // Far from UTC, the local day straddles two UTC days.
         for (zone, latitude, longitude) in [("America/Los_Angeles", 34.05, -118.24), ("Pacific/Auckland", -36.85, 174.76),
                                             ("Pacific/Honolulu", 21.31, -157.86), ("Asia/Tokyo", 35.68, 139.69)] {
@@ -121,16 +121,16 @@ enum ScheduleTest {
             }
         }
         // No location: falls back to 9 PM–7 AM.
-        check(NightSchedule.sun.isNight(at: at(22, 0), timeZone: riyadh, coordinate: nil), "fallback night")
-        check(!NightSchedule.sun.isNight(at: at(18, 0), timeZone: riyadh, coordinate: nil), "fallback evening")
+        check(NightSchedule.sun.isNight(at: at(22, 0), timeZone: tokyo, coordinate: nil), "fallback night")
+        check(!NightSchedule.sun.isNight(at: at(18, 0), timeZone: tokyo, coordinate: nil), "fallback evening")
 
         let tenToSeven = NightSchedule.hours(start: 22 * 60, end: 7 * 60)
-        check(tenToSeven.isNight(at: at(23, 0), timeZone: riyadh, coordinate: nil), "wrapping hours, late")
-        check(tenToSeven.isNight(at: at(6, 59), timeZone: riyadh, coordinate: nil), "wrapping hours, early")
-        check(!tenToSeven.isNight(at: at(7, 0), timeZone: riyadh, coordinate: nil), "wrapping hours end")
+        check(tenToSeven.isNight(at: at(23, 0), timeZone: tokyo, coordinate: nil), "wrapping hours, late")
+        check(tenToSeven.isNight(at: at(6, 59), timeZone: tokyo, coordinate: nil), "wrapping hours, early")
+        check(!tenToSeven.isNight(at: at(7, 0), timeZone: tokyo, coordinate: nil), "wrapping hours end")
         let midnightToEight = NightSchedule.hours(start: 0, end: 8 * 60)
-        check(midnightToEight.isNight(at: at(0, 30), timeZone: riyadh, coordinate: nil), "non-wrapping hours")
-        check(!midnightToEight.isNight(at: at(23, 0), timeZone: riyadh, coordinate: nil), "non-wrapping hours, before")
+        check(midnightToEight.isNight(at: at(0, 30), timeZone: tokyo, coordinate: nil), "non-wrapping hours")
+        check(!midnightToEight.isNight(at: at(23, 0), timeZone: tokyo, coordinate: nil), "non-wrapping hours, before")
 
         for preset in NightSchedule.presets {
             check(NightSchedule(storageValue: preset.storageValue) == preset, "storage round trip \(preset.storageValue)")

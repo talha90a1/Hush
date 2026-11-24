@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: macos-26
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Import signing certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/release.keychain-db"
+          password="$(openssl rand -hex 16)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          echo "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/release.p12"
+          security import "$RUNNER_TEMP/release.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/release.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          identity="$(security find-identity -p codesigning "$keychain" | awk '/"Hush Release"/ { print $2; exit }')"
+          test -n "$identity"
+          echo "SIGN_ID=$identity" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: VERSION="${TAG#v}" ./scripts/build.sh
+
+      - name: Test
+        run: ./scripts/test.sh
+
+      - name: Package
+        run: |
+          version="${TAG#v}"
+          VERSION="$version" ./scripts/dmg.sh
+          mkdir -p dist
+          mv "build.noindex/Hush-$version.dmg" dist/
+          (cd dist && shasum -a 256 "Hush-$version.dmg" > "Hush-$version.dmg.sha256")
+          # This version's section of the changelog, for the release page and the update window.
+          awk -v v="$version" '$0 ~ "^## \\[?" v "\\]?( |$)" { on = 1; next } /^## / { on = 0 } on' CHANGELOG.md > dist/notes.md
+          test -s dist/notes.md
+
+      - name: Appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          version="${TAG#v}"
+          mkdir -p updates
+          cp "dist/Hush-$version.dmg" updates/
+          cp dist/notes.md "updates/Hush-$version.md"
+          echo "$SPARKLE_PRIVATE_KEY" | build.noindex/Sparkle-*/bin/generate_appcast \
+            --ed-key-file - --embed-release-notes \
+            --download-url-prefix "https://github.com/${{ github.repository }}/releases/download/$TAG/" \
+            -o dist/appcast.xml updates
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${TAG#v}"
+          gh release create "$TAG" --title "Hush $version" --notes-file dist/notes.md \
+            "dist/Hush-$version.dmg" "dist/Hush-$version.dmg.sha256" dist/appcast.xml

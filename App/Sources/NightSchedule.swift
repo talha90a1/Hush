@@ -111,7 +111,7 @@ enum TimeZoneLocation {
         return nil
     }
 
-    /// Looks up a zone in zone.tab text ("SA\t+2438+04643\tAsia/Riyadh").
+    /// Looks up a zone in zone.tab text ("JP\t+3541+13946\tAsia/Tokyo").
     static func coordinate(for zone: String, in table: String) -> CLLocationCoordinate2D? {
         for line in table.split(separator: "\n") where !line.hasPrefix("#") {
             let fields = line.split(separator: "\t")

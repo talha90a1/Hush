@@ -3,9 +3,11 @@
 
 import AppKit
 import ServiceManagement
+import Sparkle
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let audio = AudioRouter()
+    private let updates = Updates()
     private let keys = MediaKeys()
     private var displays: [DDCDisplay] = []
     private var displaySliders: [CGDirectDisplayID: DisplaySliders] = [:]
@@ -38,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private static let searchRetries = 2
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        _ = updates.controller // starts the scheduled update checks
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "dial.medium", accessibilityDescription: "Hush")
         menu.delegate = self
@@ -417,6 +420,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(settingsItem())
 
         menu.addItem(.separator())
+        let check = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
+        check.target = updates.controller
+        menu.addItem(check)
         let uninstall = NSMenuItem(title: "Uninstall Hush…", action: #selector(uninstallHush), keyEquivalent: "")
         uninstall.target = self
         menu.addItem(uninstall)
@@ -489,10 +495,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         sub.addItem(.separator())
         toggle("Open at Login", SMAppService.mainApp.status == .enabled, #selector(toggleLogin))
+        toggle("Install Updates Automatically", updates.controller.updater.automaticallyDownloadsUpdates, #selector(toggleAutomaticUpdates))
 
         let item = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
         item.submenu = sub
         return item
+    }
+
+    @objc private func toggleAutomaticUpdates() {
+        updates.controller.updater.automaticallyDownloadsUpdates.toggle()
     }
 
     /// Turning it on puts the speakers at their safe level; turning it off leaves
