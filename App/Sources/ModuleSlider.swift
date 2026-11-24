@@ -48,7 +48,7 @@ final class ModuleSlider: NSView {
     var value: Float = 0 { didSet { if value != oldValue { needsDisplay = true } } }
     /// Draws the empty (muted) state while keeping `value`.
     var muted = false { didSet { if muted != oldValue { needsDisplay = true } } }
-    /// Called while dragging, clicking or scrolling, with the new value.
+    /// Called for changes the user makes, not for `value` set in code.
     var onChange: ((Float) -> Void)?
     var isInteractive = true
 
@@ -125,8 +125,8 @@ final class ModuleSlider: NSView {
 
     // MARK: Accessibility
 
-    // The view draws itself, so VoiceOver is told what it is. The pop-up's
-    // slider only shows a level and stays out of the way.
+    // Custom-drawn, so VoiceOver needs the role and value spelled out. The HUD's
+    // slider is display-only and stays hidden from it.
     override func isAccessibilityElement() -> Bool { isInteractive }
     override func accessibilityRole() -> NSAccessibility.Role? { .slider }
     override func accessibilityLabel() -> String? { style.label }

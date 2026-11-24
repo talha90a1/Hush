@@ -2,7 +2,7 @@
 # Installs the app and its audio driver (needs your password), then restarts CoreAudio.
 #
 #   ./scripts/install.sh                  # builds if needed, installs build.noindex/Hush.app
-#   bash install.sh ~/Downloads/Hush.app        # installs a downloaded release
+#   bash install.sh ~/Downloads/Hush.app  # installs a downloaded release
 #
 set -euo pipefail
 

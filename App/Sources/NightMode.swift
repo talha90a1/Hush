@@ -7,7 +7,7 @@
 import CoreLocation
 import Foundation
 
-/// Main thread only, like the rest of the UI.
+/// Main thread only.
 final class NightMode {
     private static let checkEvery: TimeInterval = 60
     private static let fadeSteps = 40

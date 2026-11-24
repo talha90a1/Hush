@@ -36,8 +36,8 @@ final class MediaKeys {
     }
 
     /// Which keys to swallow and handle; the rest go on to macOS untouched.
-    /// Brightness keys are taken only while the pointer is on one of `brightnessIn`,
-    /// so on the built-in screen macOS keeps handling them.
+    /// Brightness keys are taken only while the pointer is in one of `areas`,
+    /// so macOS keeps handling them on the built-in screen.
     func take(brightnessIn areas: [CGRect], volume: Bool) {
         lock.withLock { brightnessAreas = areas; takesVolume = volume }
     }

@@ -342,7 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         display.set(.speakerVolume, normalized: split.hardware)
     }
 
-    /// Display the pointer is on: where brightness keys act and the bezel shows.
+    /// The display under the pointer: where brightness keys act and the HUD shows.
     private var pointerDisplayID: CGDirectDisplayID {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
@@ -435,7 +435,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(header("Display · \(display.name)"))
         menu.addItem(sliderItem(sliders.brightness))
 
-        // Less-used controls live one level down.
         let more = NSMenu()
         if let contrast = sliders.contrast {
             more.addItem(caption("Contrast"))

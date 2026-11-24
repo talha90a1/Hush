@@ -5,7 +5,7 @@
 
 import AppKit
 
-/// Main thread only, like the rest of the UI.
+/// Main thread only.
 final class Dimmer {
     static let shared = Dimmer()
 

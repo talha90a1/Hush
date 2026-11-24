@@ -52,8 +52,7 @@ final class DDCDisplay {
     /// Every external display reachable over DDC, paired to its screen. Reads each
     /// control once (blocking: call on `discoveryQueue`, never on the main thread,
     /// which it waits for). Many monitors and HDMI ports accept writes but return
-    /// garbage on reads, so a failed brightness read is not fatal: we fall back to
-    /// the last value we set.
+    /// garbage on reads, so a failed brightness read falls back to the last value set.
     static func findAll() -> [DDCDisplay] {
         let all = services(matching: "DCPAVServiceProxy")
         defer { all.forEach { IOObjectRelease($0.entry) } }
@@ -74,7 +73,7 @@ final class DDCDisplay {
             DisplayPairing.Screen(id: $0, vendor: CGDisplayVendorNumber($0), product: CGDisplayModelNumber($0), serial: CGDisplaySerialNumber($0))
         }
         let pairs = DisplayPairing.pair(proxies: proxies.map(\.path), framebuffers: framebuffers, screens: screens)
-        // AppKit belongs to the main thread.
+        // NSScreen is main-thread only.
         let names = DispatchQueue.main.sync {
             Dictionary(NSScreen.screens.compactMap { screen in screen.displayID.map { ($0, screen.localizedName) } }) { first, _ in first }
         }

@@ -1,5 +1,4 @@
-// User preferences, with the defaults most people want. Everything here can be
-// changed from the Settings submenu.
+// User preferences, all changeable from the Settings submenu.
 //
 // SPDX-License-Identifier: MIT
 

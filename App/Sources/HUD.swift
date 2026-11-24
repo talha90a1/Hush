@@ -1,15 +1,14 @@
 // On-screen volume and brightness indicator.
 //
-// macOS 26 and later no longer draw the private OSDManager bezel for third-party
-// apps, so Hush draws its own in the current system style: a Liquid Glass pill
-// near the top-right corner holding a Control Center–style slider. Click-through,
-// never takes focus, fades out on its own.
+// macOS 26 no longer draws the private OSDManager bezel for third-party apps,
+// so Hush draws its own: a glass pill at the top right holding a Control
+// Center–style slider. Click-through, never takes focus.
 //
 // SPDX-License-Identifier: MIT
 
 import AppKit
 
-/// Main thread only, like the rest of the UI.
+/// Main thread only.
 final class HUD {
     enum Kind { case volume, mute, brightness }
 
@@ -41,7 +40,7 @@ final class HUD {
         panel.contentView = Self.glass(around: content, cornerRadius: Self.size.height / 2)
     }
 
-    /// Shows `level` (0…1) for `kind` at the top-right of the given display.
+    /// `level` is 0…1.
     func show(_ kind: Kind, level: Float, on displayID: CGDirectDisplayID) {
         slider.style = kind == .brightness ? .brightness : .volume
         slider.value = max(0, min(1, level))
