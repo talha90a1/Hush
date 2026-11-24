@@ -13,14 +13,15 @@ enum DriverInstaller {
         return url.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
     }
 
-    private static let binary = "Contents/MacOS/Hush"
-
-    /// True when the driver is missing or differs from the one inside this app.
+    /// True when the driver is missing or its version differs from the one inside this app.
+    /// Versions, not bytes: every build re-signs the binary, so its bytes always change.
     static var needsInstall: Bool {
-        guard let bundled = bundledURL, let mine = try? Data(contentsOf: bundled.appendingPathComponent(binary)) else {
-            return false
-        }
-        return (try? Data(contentsOf: installedURL.appendingPathComponent(binary))) != mine
+        guard let bundled = bundledURL, let mine = version(of: bundled) else { return false }
+        return version(of: installedURL) != mine
+    }
+
+    private static func version(of driver: URL) -> String? {
+        Bundle(url: driver)?.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     }
 
     static var isInstalled: Bool { FileManager.default.fileExists(atPath: installedURL.path) }

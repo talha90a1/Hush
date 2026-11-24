@@ -9,7 +9,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-0.0.0}"   # local builds; release.sh sets the real one
+VERSION="${VERSION:-0.0.0}"
+# Bump only when Driver/ changes: the app reinstalls the driver (password + audio restart)
+# when the installed driver's version differs from this one.
+DRIVER_VERSION=1.0.0
 SIGN_ID="${SIGN_ID:--}"
 MIN_OS=14.0
 ARCHS=(arm64 x86_64)
@@ -31,7 +34,7 @@ mkdir -p "$DRV/MacOS"
 clang -std=c11 -O2 -Wall -Wextra -mmacosx-version-min=$MIN_OS ${ARCHS[@]/#/-arch } \
   -bundle -framework CoreFoundation -framework CoreAudio \
   Driver/HushDriver.c -o "$DRV/MacOS/Hush"
-sed "s/__VERSION__/$VERSION/g" Driver/Info.plist > "$DRV/Info.plist"
+sed "s/__VERSION__/$DRIVER_VERSION/g" Driver/Info.plist > "$DRV/Info.plist"
 sign "$APP/PlugIns/Hush.driver"
 
 echo "==> App"
@@ -39,10 +42,9 @@ mkdir -p "$APP/MacOS" "$APP/Resources"
 BIN=()
 for arch in "${ARCHS[@]}"; do
   target="$arch-apple-macos$MIN_OS"
-  clang -target "$target" -O2 -Wall -fobjc-arc -c App/Bridge/OSD.m -IApp/Bridge -o "$OUT/obj/OSD-$arch.o"
   swiftc -target "$target" -O \
     -import-objc-header App/Bridge/Hush-Bridging-Header.h \
-    App/Sources/*.swift "$OUT/obj/OSD-$arch.o" \
+    App/Sources/*.swift \
     -framework AppKit -framework CoreAudio -framework IOKit -framework ServiceManagement -framework ApplicationServices \
     -o "$OUT/obj/Hush-$arch"
   BIN+=("$OUT/obj/Hush-$arch")

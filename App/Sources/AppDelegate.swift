@@ -152,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let display else { return }
         let value = Self.step(display.normalizedBrightness, up: key == .brightnessUp, fine: fine)
         display.setBrightness(normalized: value)
-        _ = HushShowOSD(display.displayID, 1, UInt32((value * Self.fineSteps).rounded()), UInt32(Self.fineSteps))
+        HUD.shared.show(.brightness, level: value, on: display.displayID)
         brightnessSlider.floatValue = value
     }
 
@@ -182,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if audio.muted { audio.muted = false }
         }
         let muted = audio.muted || value == 0
-        _ = HushShowOSD(osdDisplayID, muted ? 4 : 3, muted ? 0 : UInt32((value * Self.fineSteps).rounded()), UInt32(Self.fineSteps))
+        HUD.shared.show(muted ? .mute : .volume, level: value, on: osdDisplayID)
         volumeSlider.floatValue = value
     }
 
