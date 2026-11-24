@@ -1,4 +1,4 @@
-// Simulates Mando's clients and a target device whose clock is off by some
+// Simulates Hush's clients and a target device whose clock is off by some
 // ppm, in virtual time, and checks that after settling the target plays every
 // frame exactly once: no silence, no jump.
 //
@@ -13,7 +13,7 @@
 static uint64_t gNow = 1000000000ull;
 static uint64_t TestNow(void) { return gNow; }
 #define mach_absolute_time TestNow
-#include "../Driver/MandoDriver.c"
+#include "../Driver/HushDriver.c"
 #undef mach_absolute_time
 
 enum { kBlock = 512, kWarmupSeconds = 60, kRunSeconds = 600 };
@@ -29,7 +29,7 @@ static int Run(double ppm, int *warmupGlitches) {
     gIORunning = 0;
     gReaderSynced = false;
     gReadMargin = kMarginStep;
-    Mando_StartIO(gDriverRef, kObjDevice, 0);
+    Hush_StartIO(gDriverRef, kObjDevice, 0);
 
     const double tick = gHostTicksPerFrame;
     const double targetBlock = kBlock * tick * (1.0 + ppm * 1e-6);
@@ -46,13 +46,13 @@ static int Run(double ppm, int *warmupGlitches) {
 
         // The HAL: asks for the clock and mixes each block just before it is due.
         Float64 zeroSample; UInt64 zeroHost, seed;
-        Mando_GetZeroTimeStamp(gDriverRef, kObjDevice, 0, &zeroSample, &zeroHost, &seed);
+        Hush_GetZeroTimeStamp(gDriverRef, kObjDevice, 0, &zeroSample, &zeroHost, &seed);
         Float64 position = zeroSample + ((Float64)gNow - (Float64)zeroHost) / (gPeriodTicks / kRingFrames);
         while (position >= (Float64)(written - 64)) {
             for (int i = 0; i < kBlock; i++) in[i * 2] = in[i * 2 + 1] = (Float32)((written + i) & 0xFFFF);
             AudioServerPlugInIOCycleInfo info = { 0 };
             info.mOutputTime.mSampleTime = (Float64)written;
-            Mando_DoIOOperation(gDriverRef, kObjDevice, kObjStreamOut, 0, kAudioServerPlugInIOOperationWriteMix, kBlock, &info, in, NULL);
+            Hush_DoIOOperation(gDriverRef, kObjDevice, kObjStreamOut, 0, kAudioServerPlugInIOOperationWriteMix, kBlock, &info, in, NULL);
             written += kBlock;
         }
 
@@ -74,7 +74,7 @@ static int Run(double ppm, int *warmupGlitches) {
     }
     printf("%+6.0f ppm: trim %+.0f ppm, margin %.0f frames, %d glitches while settling, %d after\n",
            ppm, atomic_load(&gRateTrim) * 1e6, gReadMargin, *warmupGlitches, glitches);
-    Mando_StopIO(gDriverRef, kObjDevice, 0);
+    Hush_StopIO(gDriverRef, kObjDevice, 0);
     return glitches;
 }
 

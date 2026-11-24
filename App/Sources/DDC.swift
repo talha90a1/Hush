@@ -15,7 +15,7 @@ final class DDCDisplay {
     let service: IOAVService
     let name: String
     let displayID: CGDirectDisplayID
-    private let queue = DispatchQueue(label: "mando.ddc")
+    private let queue = DispatchQueue(label: "hush.ddc")
     private let lock = NSLock()
     private var pendingBrightness: UInt16?
 

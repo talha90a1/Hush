@@ -3,19 +3,19 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>es</string>
+	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Mando</string>
+	<string>Hush</string>
 	<key>CFBundleExecutable</key>
-	<string>Mando</string>
+	<string>Hush</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.aliasviejo.mando</string>
+	<string>com.talha90a1.hush</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Mando</string>
+	<string>Hush</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -29,6 +29,6 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>© Aliasviejo. MIT License.</string>
+	<string>© Aliasviejo and talha90a1. MIT License.</string>
 </dict>
 </plist>

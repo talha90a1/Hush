@@ -20,8 +20,8 @@ func text(_ s: String, size: CGFloat, weight: NSFont.Weight, color: NSColor, top
                                                .foregroundColor: color, .paragraphStyle: style])
         .draw(in: NSRect(x: 450, y: top - 400, width: 760, height: 400))
 }
-text("Mando", size: 96, weight: .bold, color: NSColor(white: 0.1, alpha: 1), top: 490)
-text("Volume and brightness keys for HDMI and DisplayPort monitors on Mac.",
+text("Hush", size: 96, weight: .bold, color: NSColor(white: 0.1, alpha: 1), top: 490)
+text("Real volume control and brightness keys for HDMI and DisplayPort monitors on Mac.",
      size: 40, weight: .regular, color: NSColor(white: 0.25, alpha: 1), top: 360)
 text("Free · Open source · Works with Apple and Logitech keyboards",
      size: 26, weight: .medium, color: NSColor(srgbRed: 0.85, green: 0.38, blue: 0.08, alpha: 1), top: 210)

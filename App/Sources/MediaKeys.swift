@@ -4,7 +4,7 @@
 //
 // The tap sees every keystroke of the session, so it runs on its own thread
 // and never waits for the app: it decides from two flags whether a key is
-// Mando's, swallows it, and hands the work to the main thread. A busy or
+// Hush's, swallows it, and hands the work to the main thread. A busy or
 // blocked main thread can't stall the keyboard.
 //
 // SPDX-License-Identifier: MIT
@@ -18,7 +18,7 @@ final class MediaKeys {
         var isBrightness: Bool { self == .brightnessUp || self == .brightnessDown }
     }
 
-    /// Called on the main thread for each key press Mando takes.
+    /// Called on the main thread for each key press Hush takes.
     var handler: ((Key, _ fine: Bool) -> Void)?
 
     private var tap: CFMachPort?
@@ -56,7 +56,7 @@ final class MediaKeys {
             CGEvent.tapEnable(tap: tap, enable: true)
             CFRunLoopRun()
         }
-        thread.name = "mando.keys"
+        thread.name = "hush.keys"
         thread.qualityOfService = .userInteractive
         thread.start()
         Log.info("event tap started")

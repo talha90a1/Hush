@@ -1,5 +1,5 @@
 // Installs, updates and removes the audio driver that ships inside the app
-// (Contents/PlugIns/Mando.driver), so nobody has to open Terminal.
+// (Contents/PlugIns/Hush.driver), so nobody has to open Terminal.
 // macOS shows its own password dialog for the admin step.
 //
 // SPDX-License-Identifier: MIT
@@ -7,13 +7,13 @@
 import AppKit
 
 enum DriverInstaller {
-    static let installedURL = URL(fileURLWithPath: "/Library/Audio/Plug-Ins/HAL/Mando.driver")
+    static let installedURL = URL(fileURLWithPath: "/Library/Audio/Plug-Ins/HAL/Hush.driver")
     static var bundledURL: URL? {
-        let url = Bundle.main.builtInPlugInsURL?.appendingPathComponent("Mando.driver")
+        let url = Bundle.main.builtInPlugInsURL?.appendingPathComponent("Hush.driver")
         return url.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
     }
 
-    private static let binary = "Contents/MacOS/Mando"
+    private static let binary = "Contents/MacOS/Hush"
 
     /// True when the driver is missing or differs from the one inside this app.
     static var needsInstall: Bool {
@@ -30,12 +30,12 @@ enum DriverInstaller {
         guard let bundled = bundledURL else { return false }
         let dst = quoted(installedURL.path)
         return runAsAdmin("rm -rf \(dst) && ditto \(quoted(bundled.path)) \(dst) && chown -R root:wheel \(dst) && (killall -9 coreaudiod || true)",
-                          prompt: "Mando necesita instalar su driver de audio.")
+                          prompt: "Hush needs to install its audio driver.")
     }
 
     static func uninstall() -> Bool {
         runAsAdmin("rm -rf \(quoted(installedURL.path)) && (killall -9 coreaudiod || true)",
-                   prompt: "Mando necesita quitar su driver de audio.")
+                   prompt: "Hush needs to remove its audio driver.")
     }
 
     private static func quoted(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }

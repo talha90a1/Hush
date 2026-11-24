@@ -1,12 +1,12 @@
-// Mando — virtual audio output with a real volume control.
+// Hush — virtual audio output with a real volume control.
 //
 // macOS gives HDMI / DisplayPort outputs a fixed volume, so the keyboard
 // volume keys do nothing. This AudioServerPlugIn publishes an output device
-// ("Mando") that HAS a volume and mute control. Whatever apps play into it is
+// ("Hush") that HAS a volume and mute control. Whatever apps play into it is
 // scaled by that volume and played on the real device (the "target"), which
-// the Mando app chooses through a custom property of the device.
+// the Hush app chooses through a custom property of the device.
 //
-// The driver plays on the target as an ordinary CoreAudio client. Mando has no
+// The driver plays on the target as an ordinary CoreAudio client. Hush has no
 // input side, so nothing ever records: no microphone permission, no indicator.
 //
 // Objects:  1 plug-in, 2 device, 3 output stream, 4 volume control, 5 mute control.
@@ -37,12 +37,12 @@ enum {
 // Custom device property (CFString). Write: UID of the device to play on, ""
 // for none. Read: UID of the device actually being played on, "" if none.
 // Every write is answered with a change notification once it has taken effect.
-enum { kMandoPropertyTarget = 'mtgt' };
+enum { kHushPropertyTarget = 'mtgt' };
 
-#define kManufacturer       "Aliasviejo"
-#define kDeviceName         "Mando"
-#define kDeviceUID          "MandoDevice_UID"
-#define kDeviceModelUID     "MandoDevice_ModelUID"
+#define kManufacturer       "Hush"
+#define kDeviceName         "Hush"
+#define kDeviceUID          "HushDevice_UID"
+#define kDeviceModelUID     "HushDevice_ModelUID"
 #define kChannels           2
 #define kBitsPerChannel     32
 #define kBytesPerFrame      (kChannels * sizeof(Float32))
@@ -70,8 +70,8 @@ static Float64 gSampleRate = 48000.0;
 static Float64 gPendingSampleRate = 48000.0;
 static UInt32 gIORunning = 0;
 
-// Mando's clock: the zero timestamp advances one period at a time, and each
-// period is stretched by gRateTrim so Mando runs at the target's real speed.
+// Hush's clock: the zero timestamp advances one period at a time, and each
+// period is stretched by gRateTrim so Hush runs at the target's real speed.
 static os_unfair_lock gClockLock = OS_UNFAIR_LOCK_INIT;
 static Float64 gHostTicksPerFrame = 0;  // nominal
 static Float64 gZeroHost = 0;
@@ -82,7 +82,7 @@ static _Atomic float gRateTrim = 0.0f;
 static _Atomic float gVolumeScalar = 0.5f;
 static _Atomic int gMuted = 0;
 
-static Float32 *gRing = NULL;                 // kRingFrames * kChannels, by Mando sample time
+static Float32 *gRing = NULL;                 // kRingFrames * kChannels, by Hush sample time
 static _Atomic SInt64 gWriteHead = kNoWrite;   // sample time just past the last frame written
 
 // Forwarding to the target. Touched only on gForwardQueue, except gTargetUID (gMutex).
@@ -171,46 +171,46 @@ static void LoadSettings(void) {
 
 #pragma mark - Forward declarations
 
-static HRESULT  Mando_QueryInterface(void*, REFIID, LPVOID*);
-static ULONG    Mando_AddRef(void*);
-static ULONG    Mando_Release(void*);
-static OSStatus Mando_Initialize(AudioServerPlugInDriverRef, AudioServerPlugInHostRef);
-static OSStatus Mando_CreateDevice(AudioServerPlugInDriverRef, CFDictionaryRef, const AudioServerPlugInClientInfo*, AudioObjectID*);
-static OSStatus Mando_DestroyDevice(AudioServerPlugInDriverRef, AudioObjectID);
-static OSStatus Mando_AddDeviceClient(AudioServerPlugInDriverRef, AudioObjectID, const AudioServerPlugInClientInfo*);
-static OSStatus Mando_RemoveDeviceClient(AudioServerPlugInDriverRef, AudioObjectID, const AudioServerPlugInClientInfo*);
-static OSStatus Mando_PerformDeviceConfigurationChange(AudioServerPlugInDriverRef, AudioObjectID, UInt64, void*);
-static OSStatus Mando_AbortDeviceConfigurationChange(AudioServerPlugInDriverRef, AudioObjectID, UInt64, void*);
-static Boolean  Mando_HasProperty(AudioServerPlugInDriverRef, AudioObjectID, pid_t, const AudioObjectPropertyAddress*);
-static OSStatus Mando_IsPropertySettable(AudioServerPlugInDriverRef, AudioObjectID, pid_t, const AudioObjectPropertyAddress*, Boolean*);
-static OSStatus Mando_GetPropertyDataSize(AudioServerPlugInDriverRef, AudioObjectID, pid_t, const AudioObjectPropertyAddress*, UInt32, const void*, UInt32*);
-static OSStatus Mando_GetPropertyData(AudioServerPlugInDriverRef, AudioObjectID, pid_t, const AudioObjectPropertyAddress*, UInt32, const void*, UInt32, UInt32*, void*);
-static OSStatus Mando_SetPropertyData(AudioServerPlugInDriverRef, AudioObjectID, pid_t, const AudioObjectPropertyAddress*, UInt32, const void*, UInt32, const void*);
-static OSStatus Mando_StartIO(AudioServerPlugInDriverRef, AudioObjectID, UInt32);
-static OSStatus Mando_StopIO(AudioServerPlugInDriverRef, AudioObjectID, UInt32);
-static OSStatus Mando_GetZeroTimeStamp(AudioServerPlugInDriverRef, AudioObjectID, UInt32, Float64*, UInt64*, UInt64*);
-static OSStatus Mando_WillDoIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32, UInt32, Boolean*, Boolean*);
-static OSStatus Mando_BeginIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32, UInt32, UInt32, const AudioServerPlugInIOCycleInfo*);
-static OSStatus Mando_DoIOOperation(AudioServerPlugInDriverRef, AudioObjectID, AudioObjectID, UInt32, UInt32, UInt32, const AudioServerPlugInIOCycleInfo*, void*, void*);
-static OSStatus Mando_EndIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32, UInt32, UInt32, const AudioServerPlugInIOCycleInfo*);
+static HRESULT  Hush_QueryInterface(void*, REFIID, LPVOID*);
+static ULONG    Hush_AddRef(void*);
+static ULONG    Hush_Release(void*);
+static OSStatus Hush_Initialize(AudioServerPlugInDriverRef, AudioServerPlugInHostRef);
+static OSStatus Hush_CreateDevice(AudioServerPlugInDriverRef, CFDictionaryRef, const AudioServerPlugInClientInfo*, AudioObjectID*);
+static OSStatus Hush_DestroyDevice(AudioServerPlugInDriverRef, AudioObjectID);
+static OSStatus Hush_AddDeviceClient(AudioServerPlugInDriverRef, AudioObjectID, const AudioServerPlugInClientInfo*);
+static OSStatus Hush_RemoveDeviceClient(AudioServerPlugInDriverRef, AudioObjectID, const AudioServerPlugInClientInfo*);
+static OSStatus Hush_PerformDeviceConfigurationChange(AudioServerPlugInDriverRef, AudioObjectID, UInt64, void*);
+static OSStatus Hush_AbortDeviceConfigurationChange(AudioServerPlugInDriverRef, AudioObjectID, UInt64, void*);
+static Boolean  Hush_HasProperty(AudioServerPlugInDriverRef, AudioObjectID, pid_t, const AudioObjectPropertyAddress*);
+static OSStatus Hush_IsPropertySettable(AudioServerPlugInDriverRef, AudioObjectID, pid_t, const AudioObjectPropertyAddress*, Boolean*);
+static OSStatus Hush_GetPropertyDataSize(AudioServerPlugInDriverRef, AudioObjectID, pid_t, const AudioObjectPropertyAddress*, UInt32, const void*, UInt32*);
+static OSStatus Hush_GetPropertyData(AudioServerPlugInDriverRef, AudioObjectID, pid_t, const AudioObjectPropertyAddress*, UInt32, const void*, UInt32, UInt32*, void*);
+static OSStatus Hush_SetPropertyData(AudioServerPlugInDriverRef, AudioObjectID, pid_t, const AudioObjectPropertyAddress*, UInt32, const void*, UInt32, const void*);
+static OSStatus Hush_StartIO(AudioServerPlugInDriverRef, AudioObjectID, UInt32);
+static OSStatus Hush_StopIO(AudioServerPlugInDriverRef, AudioObjectID, UInt32);
+static OSStatus Hush_GetZeroTimeStamp(AudioServerPlugInDriverRef, AudioObjectID, UInt32, Float64*, UInt64*, UInt64*);
+static OSStatus Hush_WillDoIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32, UInt32, Boolean*, Boolean*);
+static OSStatus Hush_BeginIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32, UInt32, UInt32, const AudioServerPlugInIOCycleInfo*);
+static OSStatus Hush_DoIOOperation(AudioServerPlugInDriverRef, AudioObjectID, AudioObjectID, UInt32, UInt32, UInt32, const AudioServerPlugInIOCycleInfo*, void*, void*);
+static OSStatus Hush_EndIOOperation(AudioServerPlugInDriverRef, AudioObjectID, UInt32, UInt32, UInt32, const AudioServerPlugInIOCycleInfo*);
 
 static AudioServerPlugInDriverInterface gInterface = {
     NULL,
-    Mando_QueryInterface, Mando_AddRef, Mando_Release,
-    Mando_Initialize, Mando_CreateDevice, Mando_DestroyDevice,
-    Mando_AddDeviceClient, Mando_RemoveDeviceClient,
-    Mando_PerformDeviceConfigurationChange, Mando_AbortDeviceConfigurationChange,
-    Mando_HasProperty, Mando_IsPropertySettable, Mando_GetPropertyDataSize,
-    Mando_GetPropertyData, Mando_SetPropertyData,
-    Mando_StartIO, Mando_StopIO, Mando_GetZeroTimeStamp,
-    Mando_WillDoIOOperation, Mando_BeginIOOperation, Mando_DoIOOperation, Mando_EndIOOperation
+    Hush_QueryInterface, Hush_AddRef, Hush_Release,
+    Hush_Initialize, Hush_CreateDevice, Hush_DestroyDevice,
+    Hush_AddDeviceClient, Hush_RemoveDeviceClient,
+    Hush_PerformDeviceConfigurationChange, Hush_AbortDeviceConfigurationChange,
+    Hush_HasProperty, Hush_IsPropertySettable, Hush_GetPropertyDataSize,
+    Hush_GetPropertyData, Hush_SetPropertyData,
+    Hush_StartIO, Hush_StopIO, Hush_GetZeroTimeStamp,
+    Hush_WillDoIOOperation, Hush_BeginIOOperation, Hush_DoIOOperation, Hush_EndIOOperation
 };
 static AudioServerPlugInDriverInterface *gInterfacePtr = &gInterface;
 static AudioServerPlugInDriverRef gDriverRef = &gInterfacePtr;
 
 #pragma mark - Factory
 
-void *Mando_Create(CFAllocatorRef allocator, CFUUIDRef requestedTypeUUID) {
+void *Hush_Create(CFAllocatorRef allocator, CFUUIDRef requestedTypeUUID) {
     (void)allocator;
     if (CFEqual(requestedTypeUUID, kAudioServerPlugInTypeUUID)) return gDriverRef;
     return NULL;
@@ -218,7 +218,7 @@ void *Mando_Create(CFAllocatorRef allocator, CFUUIDRef requestedTypeUUID) {
 
 #pragma mark - IUnknown
 
-static HRESULT Mando_QueryInterface(void *inDriver, REFIID inUUID, LPVOID *outInterface) {
+static HRESULT Hush_QueryInterface(void *inDriver, REFIID inUUID, LPVOID *outInterface) {
     if (inDriver != gDriverRef || !outInterface) return kAudioHardwareBadObjectError;
     CFUUIDRef req = CFUUIDCreateFromUUIDBytes(NULL, inUUID);
     if (!req) return kAudioHardwareIllegalOperationError;
@@ -232,13 +232,13 @@ static HRESULT Mando_QueryInterface(void *inDriver, REFIID inUUID, LPVOID *outIn
     return r;
 }
 
-static ULONG Mando_AddRef(void *inDriver) {
+static ULONG Hush_AddRef(void *inDriver) {
     if (inDriver != gDriverRef) return 0;
     pthread_mutex_lock(&gMutex); ULONG r = ++gRefCount; pthread_mutex_unlock(&gMutex);
     return r;
 }
 
-static ULONG Mando_Release(void *inDriver) {
+static ULONG Hush_Release(void *inDriver) {
     if (inDriver != gDriverRef) return 0;
     pthread_mutex_lock(&gMutex); if (gRefCount > 0) gRefCount--; ULONG r = gRefCount; pthread_mutex_unlock(&gMutex);
     return r;
@@ -254,30 +254,30 @@ static void UpdateTicksPerFrame(void) {
     os_unfair_lock_unlock(&gClockLock);
 }
 
-static OSStatus Mando_Initialize(AudioServerPlugInDriverRef inDriver, AudioServerPlugInHostRef inHost) {
+static OSStatus Hush_Initialize(AudioServerPlugInDriverRef inDriver, AudioServerPlugInHostRef inHost) {
     if (inDriver != gDriverRef) return kAudioHardwareBadObjectError;
     gHost = inHost;
     LoadSettings();
     UpdateTicksPerFrame();
     if (!gRing) gRing = calloc(kRingFrames * kChannels, sizeof(Float32));
-    if (!gForwardQueue) gForwardQueue = dispatch_queue_create("mando.forward", DISPATCH_QUEUE_SERIAL);
+    if (!gForwardQueue) gForwardQueue = dispatch_queue_create("hush.forward", DISPATCH_QUEUE_SERIAL);
     return (gRing && gForwardQueue) ? 0 : kAudioHardwareUnspecifiedError;
 }
 
-static OSStatus Mando_CreateDevice(AudioServerPlugInDriverRef d, CFDictionaryRef desc, const AudioServerPlugInClientInfo *ci, AudioObjectID *out) {
+static OSStatus Hush_CreateDevice(AudioServerPlugInDriverRef d, CFDictionaryRef desc, const AudioServerPlugInClientInfo *ci, AudioObjectID *out) {
     (void)d; (void)desc; (void)ci; (void)out; return kAudioHardwareUnsupportedOperationError;
 }
-static OSStatus Mando_DestroyDevice(AudioServerPlugInDriverRef d, AudioObjectID id) {
+static OSStatus Hush_DestroyDevice(AudioServerPlugInDriverRef d, AudioObjectID id) {
     (void)d; (void)id; return kAudioHardwareUnsupportedOperationError;
 }
-static OSStatus Mando_AddDeviceClient(AudioServerPlugInDriverRef d, AudioObjectID id, const AudioServerPlugInClientInfo *ci) {
+static OSStatus Hush_AddDeviceClient(AudioServerPlugInDriverRef d, AudioObjectID id, const AudioServerPlugInClientInfo *ci) {
     (void)ci; return (d == gDriverRef && id == kObjDevice) ? 0 : kAudioHardwareBadObjectError;
 }
-static OSStatus Mando_RemoveDeviceClient(AudioServerPlugInDriverRef d, AudioObjectID id, const AudioServerPlugInClientInfo *ci) {
+static OSStatus Hush_RemoveDeviceClient(AudioServerPlugInDriverRef d, AudioObjectID id, const AudioServerPlugInClientInfo *ci) {
     (void)ci; return (d == gDriverRef && id == kObjDevice) ? 0 : kAudioHardwareBadObjectError;
 }
 
-static OSStatus Mando_PerformDeviceConfigurationChange(AudioServerPlugInDriverRef d, AudioObjectID id, UInt64 action, void *info) {
+static OSStatus Hush_PerformDeviceConfigurationChange(AudioServerPlugInDriverRef d, AudioObjectID id, UInt64 action, void *info) {
     (void)action; (void)info;
     if (d != gDriverRef || id != kObjDevice) return kAudioHardwareBadObjectError;
     pthread_mutex_lock(&gMutex);
@@ -286,15 +286,15 @@ static OSStatus Mando_PerformDeviceConfigurationChange(AudioServerPlugInDriverRe
     pthread_mutex_unlock(&gMutex);
     return 0;
 }
-static OSStatus Mando_AbortDeviceConfigurationChange(AudioServerPlugInDriverRef d, AudioObjectID id, UInt64 action, void *info) {
+static OSStatus Hush_AbortDeviceConfigurationChange(AudioServerPlugInDriverRef d, AudioObjectID id, UInt64 action, void *info) {
     (void)d; (void)id; (void)action; (void)info; return 0;
 }
 
 #pragma mark - Forwarding to the target
 
-// The target's IO proc: plays what Mando's clients wrote, a fixed distance
-// behind Mando's clock. The two devices run on different clocks, so the error
-// in that distance steers Mando's rate (gRateTrim) until they agree.
+// The target's IO proc: plays what Hush's clients wrote, a fixed distance
+// behind Hush's clock. The two devices run on different clocks, so the error
+// in that distance steers Hush's rate (gRateTrim) until they agree.
 static OSStatus ForwardIOProc(AudioObjectID device, const AudioTimeStamp *now, const AudioBufferList *input,
                               const AudioTimeStamp *inputTime, AudioBufferList *output, const AudioTimeStamp *outputTime, void *ctx) {
     (void)device; (void)input; (void)inputTime; (void)ctx;
@@ -311,7 +311,7 @@ static OSStatus ForwardIOProc(AudioObjectID device, const AudioTimeStamp *now, c
         os_unfair_lock_unlock(&gClockLock);
 
         UInt64 outHost = (outputTime->mFlags & kAudioTimeStampHostTimeValid) ? outputTime->mHostTime : now->mHostTime;
-        Float64 position = (Float64)zeroSample + ((Float64)outHost - zeroHost) / ticksPerFrame; // Mando's sample time at outHost
+        Float64 position = (Float64)zeroSample + ((Float64)outHost - zeroHost) / ticksPerFrame; // Hush's sample time at outHost
         Float64 err = position - gReadLead - (Float64)gReadCursor;
         if (!gReaderSynced || fabs(err) > kResyncFrames) {
             Float64 ahead = outHost > now->mHostTime ? (Float64)(outHost - now->mHostTime) / nominal : 0;
@@ -328,7 +328,7 @@ static OSStatus ForwardIOProc(AudioObjectID device, const AudioTimeStamp *now, c
             gReaderSynced = false;
             if (gReadMargin < kMaxMargin) gReadMargin += kMarginStep;
         } else {
-            // err > 0: Mando runs fast, so its periods get longer.
+            // err > 0: Hush runs fast, so its periods get longer.
             gReadErrAvg += (err - gReadErrAvg) * 0.01;
             Float64 trim = gReadErrAvg * 1e-6;
             atomic_store(&gRateTrim, (float)fmax(-kMaxRateTrim, fmin(kMaxRateTrim, trim)));
@@ -397,26 +397,26 @@ static void SetTarget(CFStringRef uid) {
             }
         }
     }
-    NotifyChanged(kObjDevice, kMandoPropertyTarget, kAudioObjectPropertyScopeGlobal);
+    NotifyChanged(kObjDevice, kHushPropertyTarget, kAudioObjectPropertyScopeGlobal);
 }
 
 #pragma mark - Property dispatch
 
 static Boolean IsKnownObject(AudioObjectID id) { return id >= kObjPlugIn && id <= kObjMute; }
 
-static Boolean Mando_HasProperty(AudioServerPlugInDriverRef d, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress *a) {
+static Boolean Hush_HasProperty(AudioServerPlugInDriverRef d, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress *a) {
     UInt32 size = 0;
     if (d != gDriverRef || !a || !IsKnownObject(obj)) return false;
     // A property exists if we can compute its size (qualifier-free probe).
     if (a->mSelector == kAudioPlugInPropertyTranslateUIDToDevice) return obj == kObjPlugIn;
-    return Mando_GetPropertyDataSize(d, obj, pid, a, 0, NULL, &size) == 0;
+    return Hush_GetPropertyDataSize(d, obj, pid, a, 0, NULL, &size) == 0;
 }
 
-static OSStatus Mando_IsPropertySettable(AudioServerPlugInDriverRef d, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress *a, Boolean *out) {
-    if (!Mando_HasProperty(d, obj, pid, a)) return kAudioHardwareUnknownPropertyError;
+static OSStatus Hush_IsPropertySettable(AudioServerPlugInDriverRef d, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress *a, Boolean *out) {
+    if (!Hush_HasProperty(d, obj, pid, a)) return kAudioHardwareUnknownPropertyError;
     Boolean s = false;
     switch (obj) {
-        case kObjDevice: s = (a->mSelector == kAudioDevicePropertyNominalSampleRate || a->mSelector == kMandoPropertyTarget); break;
+        case kObjDevice: s = (a->mSelector == kAudioDevicePropertyNominalSampleRate || a->mSelector == kHushPropertyTarget); break;
         case kObjStreamOut:
             s = (a->mSelector == kAudioStreamPropertyVirtualFormat || a->mSelector == kAudioStreamPropertyPhysicalFormat ||
                  a->mSelector == kAudioStreamPropertyIsActive); break;
@@ -427,11 +427,11 @@ static OSStatus Mando_IsPropertySettable(AudioServerPlugInDriverRef d, AudioObje
     return 0;
 }
 
-static OSStatus Mando_GetPropertyDataSize(AudioServerPlugInDriverRef d, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress *a, UInt32 qs, const void *q, UInt32 *out) {
+static OSStatus Hush_GetPropertyDataSize(AudioServerPlugInDriverRef d, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress *a, UInt32 qs, const void *q, UInt32 *out) {
     (void)pid; (void)qs; (void)q;
     if (d != gDriverRef || !a || !out) return kAudioHardwareBadObjectError;
     const UInt32 kCF = sizeof(CFStringRef), kID = sizeof(AudioObjectID), kU = sizeof(UInt32);
-    const Boolean isInput = (a->mScope == kAudioObjectPropertyScopeInput); // Mando has no input side
+    const Boolean isInput = (a->mScope == kAudioObjectPropertyScopeInput); // Hush has no input side
     switch (a->mSelector) {
         case kAudioObjectPropertyBaseClass: case kAudioObjectPropertyClass: *out = sizeof(AudioClassID); return 0;
         case kAudioObjectPropertyOwner: *out = kID; return 0;
@@ -448,7 +448,7 @@ static OSStatus Mando_GetPropertyDataSize(AudioServerPlugInDriverRef d, AudioObj
             switch (a->mSelector) {
                 case kAudioObjectPropertyName: case kAudioObjectPropertyManufacturer:
                 case kAudioDevicePropertyDeviceUID: case kAudioDevicePropertyModelUID:
-                case kMandoPropertyTarget: *out = kCF; return 0;
+                case kHushPropertyTarget: *out = kCF; return 0;
                 case kAudioObjectPropertyCustomPropertyInfoList: *out = sizeof(AudioServerPlugInCustomPropertyInfo); return 0;
                 case kAudioObjectPropertyOwnedObjects: *out = (isInput ? 0 : 3) * kID; return 0;
                 case kAudioDevicePropertyTransportType: case kAudioDevicePropertyClockDomain:
@@ -501,11 +501,11 @@ static OSStatus Mando_GetPropertyDataSize(AudioServerPlugInDriverRef d, AudioObj
     return kAudioHardwareUnknownPropertyError;
 }
 
-static OSStatus Mando_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress *a,
+static OSStatus Hush_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress *a,
                                       UInt32 qs, const void *q, UInt32 inDataSize, UInt32 *outSize, void *outData) {
     if (d != gDriverRef || !a || !outSize || !outData) return kAudioHardwareBadObjectError;
     UInt32 need = 0;
-    OSStatus err = Mando_GetPropertyDataSize(d, obj, pid, a, qs, q, &need);
+    OSStatus err = Hush_GetPropertyDataSize(d, obj, pid, a, qs, q, &need);
     if (err) return err;
 
     // Variable-length list properties may be truncated to the caller's buffer.
@@ -567,7 +567,7 @@ static OSStatus Mando_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectI
                     CHECK_SIZE(sizeof(CFStringRef)); *(CFStringRef *)outData = CFSTR(kDeviceUID); *outSize = sizeof(CFStringRef); return 0;
                 case kAudioDevicePropertyModelUID:
                     CHECK_SIZE(sizeof(CFStringRef)); *(CFStringRef *)outData = CFSTR(kDeviceModelUID); *outSize = sizeof(CFStringRef); return 0;
-                case kMandoPropertyTarget:
+                case kHushPropertyTarget:
                     CHECK_SIZE(sizeof(CFStringRef));
                     pthread_mutex_lock(&gMutex);
                     *(CFStringRef *)outData = gTargetUID ? CFRetain(gTargetUID) : CFSTR(""); // the caller releases it
@@ -576,7 +576,7 @@ static OSStatus Mando_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectI
                 case kAudioObjectPropertyCustomPropertyInfoList: {
                     CHECK_SIZE(sizeof(AudioServerPlugInCustomPropertyInfo));
                     AudioServerPlugInCustomPropertyInfo *i = outData;
-                    i->mSelector = kMandoPropertyTarget;
+                    i->mSelector = kHushPropertyTarget;
                     i->mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFString;
                     i->mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeNone;
                     *outSize = sizeof(*i); return 0;
@@ -692,7 +692,7 @@ static OSStatus Mando_GetPropertyData(AudioServerPlugInDriverRef d, AudioObjectI
     return kAudioHardwareUnknownPropertyError;
 }
 
-static OSStatus Mando_SetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress *a,
+static OSStatus Hush_SetPropertyData(AudioServerPlugInDriverRef d, AudioObjectID obj, pid_t pid, const AudioObjectPropertyAddress *a,
                                       UInt32 qs, const void *q, UInt32 inDataSize, const void *inData) {
     (void)pid; (void)qs; (void)q;
     if (d != gDriverRef || !a || !inData) return kAudioHardwareBadObjectError;
@@ -712,7 +712,7 @@ static OSStatus Mando_SetPropertyData(AudioServerPlugInDriverRef d, AudioObjectI
                 if (changed && gHost) gHost->RequestDeviceConfigurationChange(gHost, kObjDevice, 0, NULL);
                 return 0;
             }
-            if (a->mSelector == kMandoPropertyTarget) {
+            if (a->mSelector == kHushPropertyTarget) {
                 CHECK_SIZE(sizeof(CFStringRef));
                 CFStringRef uid = *(const CFStringRef *)inData;
                 if (!uid || CFGetTypeID(uid) != CFStringGetTypeID() || CFStringGetLength(uid) > kMaxUIDLength ||
@@ -733,7 +733,7 @@ static OSStatus Mando_SetPropertyData(AudioServerPlugInDriverRef d, AudioObjectI
                 if (f->mFormatID != kAudioFormatLinearPCM || f->mChannelsPerFrame != kChannels || f->mBitsPerChannel != kBitsPerChannel)
                     return kAudioDeviceUnsupportedFormatError;
                 AudioObjectPropertyAddress ra = { kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
-                return Mando_SetPropertyData(d, kObjDevice, pid, &ra, 0, NULL, sizeof(Float64), &f->mSampleRate);
+                return Hush_SetPropertyData(d, kObjDevice, pid, &ra, 0, NULL, sizeof(Float64), &f->mSampleRate);
             }
             if (a->mSelector == kAudioStreamPropertyIsActive) return 0;
             break;
@@ -772,7 +772,7 @@ static OSStatus Mando_SetPropertyData(AudioServerPlugInDriverRef d, AudioObjectI
 
 #pragma mark - IO
 
-static OSStatus Mando_StartIO(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 client) {
+static OSStatus Hush_StartIO(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 client) {
     (void)client;
     if (d != gDriverRef || id != kObjDevice) return kAudioHardwareBadObjectError;
     pthread_mutex_lock(&gMutex);
@@ -789,7 +789,7 @@ static OSStatus Mando_StartIO(AudioServerPlugInDriverRef d, AudioObjectID id, UI
     return 0;
 }
 
-static OSStatus Mando_StopIO(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 client) {
+static OSStatus Hush_StopIO(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 client) {
     (void)client;
     if (d != gDriverRef || id != kObjDevice) return kAudioHardwareBadObjectError;
     pthread_mutex_lock(&gMutex);
@@ -798,7 +798,7 @@ static OSStatus Mando_StopIO(AudioServerPlugInDriverRef d, AudioObjectID id, UIn
     return 0;
 }
 
-static OSStatus Mando_GetZeroTimeStamp(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 client, Float64 *outSampleTime, UInt64 *outHostTime, UInt64 *outSeed) {
+static OSStatus Hush_GetZeroTimeStamp(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 client, Float64 *outSampleTime, UInt64 *outHostTime, UInt64 *outSeed) {
     (void)client;
     if (d != gDriverRef || id != kObjDevice) return kAudioHardwareBadObjectError;
     os_unfair_lock_lock(&gClockLock);
@@ -814,7 +814,7 @@ static OSStatus Mando_GetZeroTimeStamp(AudioServerPlugInDriverRef d, AudioObject
     return 0;
 }
 
-static OSStatus Mando_WillDoIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 client, UInt32 op, Boolean *outWill, Boolean *outInPlace) {
+static OSStatus Hush_WillDoIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 client, UInt32 op, Boolean *outWill, Boolean *outInPlace) {
     (void)client;
     if (d != gDriverRef || id != kObjDevice) return kAudioHardwareBadObjectError;
     *outWill = (op == kAudioServerPlugInIOOperationWriteMix);
@@ -822,12 +822,12 @@ static OSStatus Mando_WillDoIOOperation(AudioServerPlugInDriverRef d, AudioObjec
     return 0;
 }
 
-static OSStatus Mando_BeginIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 c, UInt32 op, UInt32 n, const AudioServerPlugInIOCycleInfo *info) {
+static OSStatus Hush_BeginIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 c, UInt32 op, UInt32 n, const AudioServerPlugInIOCycleInfo *info) {
     (void)c; (void)op; (void)n; (void)info;
     return (d == gDriverRef && id == kObjDevice) ? 0 : kAudioHardwareBadObjectError;
 }
 
-static OSStatus Mando_EndIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 c, UInt32 op, UInt32 n, const AudioServerPlugInIOCycleInfo *info) {
+static OSStatus Hush_EndIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id, UInt32 c, UInt32 op, UInt32 n, const AudioServerPlugInIOCycleInfo *info) {
     (void)c; (void)op; (void)n; (void)info;
     return (d == gDriverRef && id == kObjDevice) ? 0 : kAudioHardwareBadObjectError;
 }
@@ -836,7 +836,7 @@ static inline Float32 *RingFrame(SInt64 sampleTime) {
     return &gRing[((UInt64)sampleTime & (kRingFrames - 1)) * kChannels];
 }
 
-static OSStatus Mando_DoIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id, AudioObjectID stream, UInt32 client, UInt32 op,
+static OSStatus Hush_DoIOOperation(AudioServerPlugInDriverRef d, AudioObjectID id, AudioObjectID stream, UInt32 client, UInt32 op,
                                     UInt32 frames, const AudioServerPlugInIOCycleInfo *info, void *mainBuf, void *secondaryBuf) {
     (void)client; (void)secondaryBuf;
     if (d != gDriverRef || id != kObjDevice) return kAudioHardwareBadObjectError;

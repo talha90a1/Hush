@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "dial.medium", accessibilityDescription: "Mando")
+        statusItem.button?.image = NSImage(systemSymbolName: "dial.medium", accessibilityDescription: "Hush")
         menu.delegate = self
         statusItem.menu = menu
 
@@ -80,10 +80,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func offerDriverInstall() {
         let update = DriverInstaller.isInstalled
         let alert = NSAlert()
-        alert.messageText = update ? "Actualizar el driver de audio" : "Instalar el driver de audio"
-        alert.informativeText = "Mando usa un dispositivo de audio virtual para que las teclas de volumen funcionen con tu monitor o TV. macOS te pedirá tu contraseña y el audio se cortará un momento."
-        alert.addButton(withTitle: update ? "Actualizar" : "Instalar")
-        alert.addButton(withTitle: "Ahora no")
+        alert.messageText = update ? "Update the audio driver" : "Install the audio driver"
+        alert.informativeText = "Hush uses a virtual audio device so the volume keys work with your monitor or TV. macOS will ask for your password, and sound will cut out for a moment."
+        alert.addButton(withTitle: update ? "Update" : "Install")
+        alert.addButton(withTitle: "Not Now")
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         installDriver()
@@ -106,12 +106,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func uninstallMando() {
+    @objc private func uninstallHush() {
         let alert = NSAlert()
-        alert.messageText = "¿Desinstalar Mando?"
-        alert.informativeText = "Se quitarán el driver de audio y la app. macOS te pedirá tu contraseña."
-        alert.addButton(withTitle: "Desinstalar")
-        alert.addButton(withTitle: "Cancelar")
+        alert.messageText = "Uninstall Hush?"
+        alert.informativeText = "The audio driver and the app will be removed. macOS will ask for your password."
+        alert.addButton(withTitle: "Uninstall")
+        alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -152,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let display else { return }
         let value = Self.step(display.normalizedBrightness, up: key == .brightnessUp, fine: fine)
         display.setBrightness(normalized: value)
-        _ = MandoShowOSD(display.displayID, 1, UInt32((value * Self.fineSteps).rounded()), UInt32(Self.fineSteps))
+        _ = HushShowOSD(display.displayID, 1, UInt32((value * Self.fineSteps).rounded()), UInt32(Self.fineSteps))
         brightnessSlider.floatValue = value
     }
 
@@ -182,7 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if audio.muted { audio.muted = false }
         }
         let muted = audio.muted || value == 0
-        _ = MandoShowOSD(osdDisplayID, muted ? 4 : 3, muted ? 0 : UInt32((value * Self.fineSteps).rounded()), UInt32(Self.fineSteps))
+        _ = HushShowOSD(osdDisplayID, muted ? 4 : 3, muted ? 0 : UInt32((value * Self.fineSteps).rounded()), UInt32(Self.fineSteps))
         volumeSlider.floatValue = value
     }
 
@@ -193,8 +193,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? CGMainDisplayID()
     }
 
-    /// Sliders, and which keys Mando takes: brightness with a DDC display,
-    /// volume only while Mando is the output (otherwise macOS handles them).
+    /// Sliders, and which keys Hush takes: brightness with a DDC display,
+    /// volume only while Hush is the output (otherwise macOS handles them).
     private func refreshControls() {
         volumeSlider.floatValue = audio.volume
         if let display { brightnessSlider.floatValue = display.normalizedBrightness }
@@ -208,21 +208,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshControls()
 
         if audio.driverInstalled {
-            menu.addItem(header("Volumen"))
+            menu.addItem(header("Volume"))
             menu.addItem(sliderItem(volumeSlider, symbol: "speaker.wave.2.fill"))
             let status: String
             if let t = audio.target {
-                status = "Enviando audio a \(CA.name(t))"
+                status = "Playing through \(CA.name(t))"
             } else if audio.isAwaitingTarget {
-                status = "En espera: volverá al monitor cuando se encienda"
+                status = "Waiting: returns to the monitor when it turns on"
             } else {
-                status = "Inactivo: la salida actual ya tiene volumen propio"
+                status = "Inactive: the current output has its own volume"
             }
             menu.addItem(note(status))
         } else {
-            menu.addItem(note("Falta el driver de audio de Mando"))
+            menu.addItem(note("Hush audio driver is missing"))
             if DriverInstaller.bundledURL != nil {
-                let item = NSMenuItem(title: "Instalar driver de audio…", action: #selector(installDriver), keyEquivalent: "")
+                let item = NSMenuItem(title: "Install Audio Driver…", action: #selector(installDriver), keyEquivalent: "")
                 item.target = self
                 menu.addItem(item)
             }
@@ -230,19 +230,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
         if let display {
-            menu.addItem(header("Brillo · \(display.name)"))
+            menu.addItem(header("Brightness · \(display.name)"))
             menu.addItem(sliderItem(brightnessSlider, symbol: "sun.max.fill"))
             if !MediaKeys.hasAccessibility {
-                let item = NSMenuItem(title: "Permitir teclas de brillo (Accesibilidad)…", action: #selector(openAccessibility), keyEquivalent: "")
+                let item = NSMenuItem(title: "Allow Brightness Keys (Accessibility)…", action: #selector(openAccessibility), keyEquivalent: "")
                 item.target = self
                 menu.addItem(item)
             }
         } else {
-            menu.addItem(note("Brillo: ningún monitor externo responde por DDC"))
+            menu.addItem(note("Brightness: no external monitor responds over DDC"))
         }
 
         menu.addItem(.separator())
-        let outputs = NSMenuItem(title: "Salida de audio", action: nil, keyEquivalent: "")
+        let outputs = NSMenuItem(title: "Sound Output", action: nil, keyEquivalent: "")
         let sub = NSMenu()
         let current = audio.target ?? CA.defaultOutput
         for dev in audio.outputDevices() {
@@ -255,16 +255,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         outputs.submenu = sub
         menu.addItem(outputs)
 
-        let login = NSMenuItem(title: "Abrir al iniciar sesión", action: #selector(toggleLogin), keyEquivalent: "")
+        let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
 
         menu.addItem(.separator())
-        let uninstall = NSMenuItem(title: "Desinstalar Mando…", action: #selector(uninstallMando), keyEquivalent: "")
+        let uninstall = NSMenuItem(title: "Uninstall Hush…", action: #selector(uninstallHush), keyEquivalent: "")
         uninstall.target = self
         menu.addItem(uninstall)
-        let quit = NSMenuItem(title: "Salir de Mando", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Hush", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 

@@ -7,9 +7,9 @@
 #import <Foundation/Foundation.h>
 #import <dlfcn.h>
 #import <objc/message.h>
-#include "Mando-Bridging-Header.h"
+#include "Hush-Bridging-Header.h"
 
-bool MandoShowOSD(uint32_t displayID, long long image, uint32_t filled, uint32_t total) {
+bool HushShowOSD(uint32_t displayID, long long image, uint32_t filled, uint32_t total) {
     static id manager = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
