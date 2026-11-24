@@ -21,6 +21,7 @@ import Foundation
 final class AudioRouter {
     static let hushUID = "HushDevice_UID"
     private static let savedTargetKey = "targetDeviceUID"
+    private static let savedVolumeKey = "volume"
     /// The driver's custom property: UID of the device it plays on ("" = none).
     private static let targetProperty = CA.address(0x6D74_6774) // 'mtgt'
 
@@ -41,6 +42,11 @@ final class AudioRouter {
     private var hushListeners: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
     private var listenedHush: AudioObjectID = 0
 
+    /// Between start() and stop(). Outside it the router leaves the driver and
+    /// the system output alone: during a driver update the next instance of the
+    /// app is already talking to the driver while this one is still quitting.
+    private var running = false
+
     var onChange: (() -> Void)?
 
     var hush: AudioObjectID? { CA.device(withUID: Self.hushUID) }
@@ -50,6 +56,7 @@ final class AudioRouter {
     // MARK: Lifecycle
 
     func start() {
+        running = true
         let sys = CA.system
         func listen(_ selector: AudioObjectPropertySelector, _ block: @escaping () -> Void) {
             listeners.append((sys, CA.address(selector), CA.listen(sys, CA.address(selector), block)))
@@ -71,6 +78,8 @@ final class AudioRouter {
 
     /// Stop the driver's playback and restore the real device as system output.
     func stop() {
+        guard running else { return }
+        running = false
         for (obj, addr, l) in listeners { CA.unlisten(obj, addr, l) }
         listeners.removeAll()
         let restoreTo = target
@@ -157,7 +166,7 @@ final class AudioRouter {
 
     func evaluate() {
         attachHushListeners()
-        if pending == nil { applyPolicy() } // otherwise the driver's answer runs it
+        if running, pending == nil { applyPolicy() } // otherwise the driver's answer runs it
         onChange?()
     }
 
@@ -187,7 +196,11 @@ final class AudioRouter {
             let uid = UserDefaults.standard.string(forKey: Self.savedTargetKey)
             if let dev = usable(uid), ask(dev) { return }
             awaitedUID = uid
-            fallback = outputDevices().first ?? 0
+            // Prefer an output with its own volume. Never the awaited device itself
+            // (still listed while it refuses IO after a wake): it would play at
+            // full level with Hush out of the way, and end the wait.
+            let outputs = outputDevices()
+            fallback = outputs.first(where: CA.hasSettableVolume) ?? outputs.first { CA.uid($0) != uid } ?? 0
             if fallback != 0 { CA.setDefaultOutput(fallback) }
         } else if current != 0, !CA.hasSettableVolume(current), CA.hasOutput(current) {
             // A fixed-volume output (HDMI…) was selected: put Hush in front of it.
@@ -255,8 +268,15 @@ final class AudioRouter {
         hushListeners.removeAll()
         listenedHush = current
         guard current != 0 else { return }
-        let volume = CA.address(kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput)
-        hushListeners.append((volume, CA.listen(current, volume) { [weak self] in self?.onChange?() }))
+        // A new device (launch, reboot, CoreAudio restart) starts at whatever
+        // CoreAudio picks, often 100%: put back the last volume the user set.
+        if let saved = UserDefaults.standard.object(forKey: Self.savedVolumeKey) as? Float { self.volume = saved }
+        let volumeAddress = CA.address(kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput)
+        hushListeners.append((volumeAddress, CA.listen(current, volumeAddress) { [weak self] in
+            guard let self else { return }
+            UserDefaults.standard.set(self.volume, forKey: Self.savedVolumeKey)
+            self.onChange?()
+        }))
         hushListeners.append((Self.targetProperty, CA.listen(current, Self.targetProperty) { [weak self] in self?.driverAnswered() }))
     }
 }

@@ -7,16 +7,35 @@ import ServiceManagement
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let audio = AudioRouter()
     private let keys = MediaKeys()
-    private var display: DDCDisplay?
+    private var displays: [DDCDisplay] = []
+    private var displaySliders: [CGDirectDisplayID: DisplaySliders] = [:]
+    private let nightMode = NightMode()
+    /// Counts display searches, so only the newest one's result is used.
+    private var search = 0
+    /// Most controls each monitor (by `key`) has answered a read for.
+    private var answered: [String: Int] = [:]
+    private var quitSignal: DispatchSourceSignal?
 
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
-    private let volumeSlider = NSSlider(value: 0.5, minValue: 0, maxValue: 1, target: nil, action: nil)
-    private let brightnessSlider = NSSlider(value: 0.5, minValue: 0, maxValue: 1, target: nil, action: nil)
+    private static let menuWidth: CGFloat = 280
+    private static let sliderWidth = menuWidth - 32
+    private let volumeSlider = ModuleSlider(style: .volume, width: sliderWidth)
+
+    private struct DisplaySliders {
+        let brightness: ModuleSlider
+        let contrast: ModuleSlider?
+        let speaker: ModuleSlider?
+    }
+
+    /// The bottom of the brightness range dims with an overlay once the
+    /// monitor's own backlight is at its lowest.
+    private static let dimZone: Float = 0.2
 
     /// Steps per key press across the whole range, like macOS; ⇧⌥ gives quarter steps.
     private static let keySteps: Float = 16
     private static let fineSteps = keySteps * 4
+    private static let searchRetries = 2
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -24,23 +43,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.delegate = self
         statusItem.menu = menu
 
-        volumeSlider.target = self
-        volumeSlider.action = #selector(volumeSliderMoved)
-        brightnessSlider.target = self
-        brightnessSlider.action = #selector(brightnessSliderMoved)
-        brightnessSlider.isContinuous = true
+        volumeSlider.onChange = { [weak self] value in
+            guard let self else { return }
+            self.setVolumeLevel(value)
+            if self.audio.muted { self.audio.muted = false }
+        }
+
+        nightMode.displays = { [weak self] in self?.displays ?? [] }
+        nightMode.level = { [weak self] display in self?.level(of: display) ?? 0 }
+        nightMode.apply = { [weak self] level, display in
+            self?.setLevel(level, of: display.displayID)
+            self?.displaySliders[display.displayID]?.brightness.value = level
+        }
+        nightMode.start()
 
         audio.onChange = { [weak self] in self?.refreshControls() }
         audio.start()
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let found = DDCDisplay.findExternal()
-            Log.info(found.map { "DDC display: \($0.name) id=\($0.displayID)" } ?? "DDC display: none")
-            DispatchQueue.main.async {
-                self?.display = found
-                self?.refreshControls()
-            }
-        }
+        findDisplays(after: 0)
         Log.info("accessibility trusted: \(MediaKeys.hasAccessibility)")
 
         keys.handler = { [weak self] key, fine in
@@ -59,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                                name: NSApplication.didChangeScreenParametersNotification, object: nil)
 
         enableLoginOnce()
+        quitOnSIGTERM()
 
         if DriverInstaller.needsInstall {
             DispatchQueue.main.async { [weak self] in self?.offerDriverInstall() }
@@ -73,6 +94,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !UserDefaults.standard.bool(forKey: key), Bundle.main.bundlePath.hasPrefix("/Applications/") else { return }
         UserDefaults.standard.set(true, forKey: key)
         if SMAppService.mainApp.status != .enabled { toggleLogin() }
+    }
+
+    /// `pkill Hush` (install.sh, uninstall.sh) and `kill` would end the app without
+    /// `applicationWillTerminate`, leaving the monitor's speakers raised with
+    /// nothing in front of them. Quit the normal way instead.
+    private func quitOnSIGTERM() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        quitSignal = source
     }
 
     // MARK: Driver
@@ -90,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func installDriver() {
-        audio.stop()
+        stopAudio()
         guard DriverInstaller.install() else { audio.start(); return }
         relaunch()
     }
@@ -115,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.alertStyle = .warning
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        audio.stop()
+        stopAudio()
         guard DriverInstaller.uninstall() else { audio.start(); return }
         try? SMAppService.mainApp.unregister()
         NSWorkspace.shared.recycle([Bundle.main.bundleURL]) { _, _ in
@@ -124,6 +156,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        stopAudio()
+    }
+
+    /// Hush lets go of the audio (quit, driver install or removal). Without Hush
+    /// the Mac sends full-volume audio, so the speakers go to their safe level
+    /// first, and only then does the monitor become the output again.
+    private func stopAudio() {
+        if Settings.oneVolumeControl {
+            for display in displays where display.supports(.speakerVolume) {
+                display.setAndWait(.speakerVolume, normalized: display.speakerBase)
+            }
+        }
         audio.stop()
     }
 
@@ -137,23 +181,118 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// After a wake or a display change, give the display a moment, then find
     /// it again for DDC and let the audio route catch up.
     @objc private func displaysChanged() {
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) { [weak self] in
-            let found = DDCDisplay.findExternal()
+        Dimmer.shared.refresh()
+        nightMode.check() // also catches day/night changing while asleep
+        findDisplays(after: 2)
+    }
+
+    /// Wake and screen changes arrive in bursts: only the newest search reads the
+    /// monitors, and searches run one at a time.
+    private func findDisplays(after delay: TimeInterval, retry: Int = 0) {
+        search += 1
+        let current = search
+        DDCDisplay.discoveryQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard DispatchQueue.main.sync(execute: { self?.search == current }) else { return }
+            let found = DDCDisplay.findAll()
+            Log.info("DDC displays: \(found.map { "\($0.name) id=\($0.displayID) controls=\($0.answered)" })")
             DispatchQueue.main.async {
-                self?.display = found
-                self?.audio.evaluate() // ends in refreshControls()
+                guard let self, self.search == current else { return }
+                self.setDisplays(found)
+                self.retryIfIncomplete(found, retry: retry)
             }
         }
+    }
+
+    /// A monitor wakes slower than the Mac and may not answer yet. Without its
+    /// answers there is no speaker control, so the one-volume control and the
+    /// safe level on quit would silently stop working: look again a few times.
+    private func retryIfIncomplete(_ found: [DDCDisplay], retry: Int) {
+        let external = NSScreen.screens.contains { CGDisplayIsBuiltin($0.displayID ?? 0) == 0 }
+        let incomplete = found.isEmpty ? external : found.contains { $0.answered < answered[$0.key] ?? 1 }
+        if incomplete, retry < Self.searchRetries {
+            findDisplays(after: 4, retry: retry + 1)
+            return
+        }
+        // Settled. A monitor that never answers (many only accept writes) is
+        // remembered as such, so it isn't searched for again after every change.
+        for display in found { answered[display.key] = max(display.answered, answered[display.key] ?? 0) }
+    }
+
+    private func setDisplays(_ found: [DDCDisplay]) {
+        displays = found
+        displaySliders = [:]
+        Dimmer.shared.keep(only: Set(found.map(\.displayID)))
+        for display in found {
+            let id = display.displayID
+            let brightness = ModuleSlider(style: .brightness, width: Self.sliderWidth)
+            brightness.onChange = { [weak self] value in self?.userSetLevel(value, of: id) }
+            let contrast = display.supports(.contrast) ? ModuleSlider(style: .contrast, width: Self.sliderWidth) : nil
+            contrast?.onChange = { [weak display] value in display?.set(.contrast, normalized: value) }
+            let speaker = display.supports(.speakerVolume) ? ModuleSlider(style: .speaker, width: Self.sliderWidth) : nil
+            speaker?.onChange = { [weak self, weak display] value in
+                guard let self, let display else { return }
+                if Settings.oneVolumeControl {
+                    let level = self.volumeLevel
+                    display.speakerBase = value
+                    // Not playing through this monitor: it just waits at its safe level.
+                    if display === self.speakerDisplay { self.setVolumeLevel(level) } else { display.set(.speakerVolume, normalized: value) }
+                } else {
+                    display.set(.speakerVolume, normalized: value)
+                }
+            }
+            // Start from the safe level: the Sound slider takes it from there.
+            if speaker != nil, Settings.oneVolumeControl { display.set(.speakerVolume, normalized: display.speakerBase) }
+            displaySliders[id] = DisplaySliders(brightness: brightness, contrast: contrast, speaker: speaker)
+            // The overlay only goes with the backlight at its lowest; a display ID
+            // can also come back as a different monitor.
+            let savedDim = UserDefaults.standard.float(forKey: display.key + ".dim")
+            Dimmer.shared.setDepth(display.brightness == 0 ? savedDim : 0, for: id)
+        }
+        nightMode.reset()
+        audio.evaluate() // ends in refreshControls()
+    }
+
+    private func display(_ displayID: CGDirectDisplayID) -> DDCDisplay? {
+        displays.first { $0.displayID == displayID }
     }
 
     // MARK: Brightness
 
     private func handleBrightnessKey(_ key: MediaKeys.Key, fine: Bool) {
-        guard let display else { return }
-        let value = Self.step(display.normalizedBrightness, up: key == .brightnessUp, fine: fine)
-        display.setBrightness(normalized: value)
+        // The tap only takes the key with the pointer on a DDC display.
+        guard let display = display(pointerDisplayID) else { return }
+        let value = Self.step(level(of: display), up: key == .brightnessUp, fine: fine)
+        userSetLevel(value, of: display.displayID)
         HUD.shared.show(.brightness, level: value, on: display.displayID)
-        brightnessSlider.floatValue = value
+        displaySliders[display.displayID]?.brightness.value = value
+    }
+
+    /// One brightness scale per display: the monitor's backlight above `dimZone`,
+    /// the dimming overlay below it.
+    private func level(of display: DDCDisplay) -> Float {
+        let dim = Dimmer.shared.depth(of: display.displayID)
+        if dim > 0 { return Self.dimZone * (1 - dim) }
+        return Self.dimZone + display.normalizedBrightness * (1 - Self.dimZone)
+    }
+
+    /// A brightness the user chose (not night mode's fade): night mode learns it.
+    private func userSetLevel(_ value: Float, of displayID: CGDirectDisplayID) {
+        setLevel(value, of: displayID)
+        if let display = display(displayID) { nightMode.userSetLevel(value, of: display) }
+    }
+
+    private func setLevel(_ value: Float, of displayID: CGDirectDisplayID) {
+        guard let display = display(displayID) else { return }
+        let dim: Float
+        if value >= Self.dimZone {
+            dim = 0
+            display.setBrightness(normalized: (value - Self.dimZone) / (1 - Self.dimZone))
+        } else {
+            dim = 1 - value / Self.dimZone
+            if display.brightness != 0 { display.setBrightness(normalized: 0) }
+        }
+        Dimmer.shared.setDepth(dim, for: displayID)
+        UserDefaults.standard.set(dim, forKey: display.key + ".dim")
     }
 
     private static func step(_ value: Float, up: Bool, fine: Bool) -> Float {
@@ -161,44 +300,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return max(0, min(1, ((value * steps).rounded() + (up ? 1 : -1)) / steps))
     }
 
-    @objc private func brightnessSliderMoved() {
-        display?.setBrightness(normalized: brightnessSlider.floatValue)
-    }
-
     // MARK: Volume
-
-    @objc private func volumeSliderMoved() {
-        audio.volume = volumeSlider.floatValue
-    }
 
     private func handleVolumeKey(_ key: MediaKeys.Key, fine: Bool) {
         guard audio.isActiveOutput else { return }
-        var value = audio.volume
+        var value = volumeLevel
         if key == .mute {
             audio.muted.toggle()
         } else {
             value = Self.step(value, up: key == .volumeUp, fine: fine)
-            audio.volume = value
+            setVolumeLevel(value)
             if audio.muted { audio.muted = false }
         }
         let muted = audio.muted || value == 0
-        HUD.shared.show(muted ? .mute : .volume, level: value, on: osdDisplayID)
-        volumeSlider.floatValue = value
+        HUD.shared.show(muted ? .mute : .volume, level: value, on: pointerDisplayID)
+        volumeSlider.value = value
+        volumeSlider.muted = audio.muted
     }
 
-    /// Display the mouse is on, so the bezel shows where you're looking.
-    private var osdDisplayID: CGDirectDisplayID {
+    /// The monitor whose speakers Hush is playing through, when the one-volume
+    /// control drives them too.
+    private var speakerDisplay: DDCDisplay? {
+        guard Settings.oneVolumeControl, audio.isActiveOutput, let target = audio.target else { return nil }
+        let candidates = displays.filter { $0.supports(.speakerVolume) }
+        return candidates.first { $0.name == CA.name(target) } ?? (candidates.count == 1 ? candidates[0] : nil)
+    }
+
+    /// The Sound slider's position: Hush's volume, plus the monitor's speakers on top.
+    private var volumeLevel: Float {
+        guard let display = speakerDisplay, let hardware = display.normalized(.speakerVolume) else { return audio.volume }
+        return VolumeCurve.level(software: audio.volume, hardware: hardware, base: display.speakerBase)
+    }
+
+    private func setVolumeLevel(_ level: Float) {
+        guard let display = speakerDisplay else { audio.volume = level; return }
+        let split = VolumeCurve.split(level, base: display.speakerBase)
+        audio.volume = split.software
+        display.set(.speakerVolume, normalized: split.hardware)
+    }
+
+    /// Display the pointer is on: where brightness keys act and the bezel shows.
+    private var pointerDisplayID: CGDirectDisplayID {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
-        return (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? CGMainDisplayID()
+        return screen?.displayID ?? CGMainDisplayID()
     }
 
-    /// Sliders, and which keys Hush takes: brightness with a DDC display,
+    /// Sliders, and which keys Hush takes: brightness on DDC displays,
     /// volume only while Hush is the output (otherwise macOS handles them).
     private func refreshControls() {
-        volumeSlider.floatValue = audio.volume
-        if let display { brightnessSlider.floatValue = display.normalizedBrightness }
-        keys.take(brightness: display != nil, volume: audio.isActiveOutput)
+        volumeSlider.value = volumeLevel
+        volumeSlider.muted = audio.muted
+        for display in displays {
+            guard let sliders = displaySliders[display.displayID] else { continue }
+            sliders.brightness.value = level(of: display)
+            sliders.contrast?.value = display.normalized(.contrast) ?? 0
+            sliders.speaker?.value = Settings.oneVolumeControl ? display.speakerBase : display.normalized(.speakerVolume) ?? 0
+        }
+        keys.take(brightnessIn: displays.map { CGDisplayBounds($0.displayID) }, volume: audio.isActiveOutput)
     }
 
     // MARK: Menu
@@ -208,8 +367,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshControls()
 
         if audio.driverInstalled {
-            menu.addItem(header("Volume"))
-            menu.addItem(sliderItem(volumeSlider, symbol: "speaker.wave.2.fill"))
+            menu.addItem(header("Sound"))
+            menu.addItem(sliderItem(volumeSlider))
             let status: String
             if let t = audio.target {
                 status = "Playing through \(CA.name(t))"
@@ -229,16 +388,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
-        if let display {
-            menu.addItem(header("Brightness · \(display.name)"))
-            menu.addItem(sliderItem(brightnessSlider, symbol: "sun.max.fill"))
-            if !MediaKeys.hasAccessibility {
-                let item = NSMenuItem(title: "Allow Brightness Keys (Accessibility)…", action: #selector(openAccessibility), keyEquivalent: "")
-                item.target = self
-                menu.addItem(item)
-            }
-        } else {
+        if displays.isEmpty {
             menu.addItem(note("Brightness: no external monitor responds over DDC"))
+        }
+        for display in displays {
+            addDisplaySection(display, to: menu)
+        }
+        if !displays.isEmpty, !MediaKeys.hasAccessibility {
+            let item = NSMenuItem(title: "Allow Brightness Keys (Accessibility)…", action: #selector(openAccessibility), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
         }
 
         menu.addItem(.separator())
@@ -255,10 +414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         outputs.submenu = sub
         menu.addItem(outputs)
 
-        let login = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
-        login.target = self
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(login)
+        menu.addItem(settingsItem())
 
         menu.addItem(.separator())
         let uninstall = NSMenuItem(title: "Uninstall Hush…", action: #selector(uninstallHush), keyEquivalent: "")
@@ -266,6 +422,115 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(uninstall)
         let quit = NSMenuItem(title: "Quit Hush", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
+    }
+
+    private func addDisplaySection(_ display: DDCDisplay, to menu: NSMenu) {
+        guard let sliders = displaySliders[display.displayID] else { return }
+        menu.addItem(header("Display · \(display.name)"))
+        menu.addItem(sliderItem(sliders.brightness))
+
+        // Less-used controls live one level down.
+        let more = NSMenu()
+        if let contrast = sliders.contrast {
+            more.addItem(caption("Contrast"))
+            more.addItem(sliderItem(contrast))
+        }
+        if let speaker = sliders.speaker {
+            more.addItem(caption(Settings.oneVolumeControl ? "Monitor speakers: safe level" : "Monitor speakers"))
+            more.addItem(sliderItem(speaker))
+            if Settings.oneVolumeControl {
+                more.addItem(caption("Used below 75% on the Sound slider and when Hush quits"))
+            }
+        }
+        if !display.inputs.isEmpty {
+            if more.numberOfItems > 0 { more.addItem(.separator()) }
+            more.addItem(caption("Input"))
+            for input in display.inputs {
+                let item = NSMenuItem(title: input.name, action: #selector(selectInput(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = (display.displayID, input.code) as (CGDirectDisplayID, UInt8)
+                item.state = input.code == display.currentInput ? .on : .off
+                more.addItem(item)
+            }
+        }
+        if more.numberOfItems > 0 {
+            let item = NSMenuItem(title: "More Controls", action: nil, keyEquivalent: "")
+            item.submenu = more
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+    }
+
+    private func settingsItem() -> NSMenuItem {
+        let sub = NSMenu()
+        sub.autoenablesItems = false // or the schedules stay clickable with night dimming off
+        func toggle(_ title: String, _ on: Bool, _ action: Selector) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.state = on ? .on : .off
+            sub.addItem(item)
+        }
+
+        toggle("One Volume Control", Settings.oneVolumeControl, #selector(toggleOneVolume))
+        sub.addItem(caption("Sound slider also drives the monitor's speakers above 75%"))
+
+        sub.addItem(.separator())
+        toggle("Night Dimming", Settings.nightDimming, #selector(toggleNightDimming))
+        for schedule in NightSchedule.presets {
+            let item = NSMenuItem(title: schedule.title, action: #selector(selectSchedule(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = schedule.storageValue
+            item.state = schedule == Settings.nightSchedule ? .on : .off
+            item.indentationLevel = 1
+            item.isEnabled = Settings.nightDimming
+            sub.addItem(item)
+        }
+        sub.addItem(caption("Remembers the brightness you set at night and by day"))
+
+        sub.addItem(.separator())
+        toggle("Open at Login", SMAppService.mainApp.status == .enabled, #selector(toggleLogin))
+
+        let item = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
+        item.submenu = sub
+        return item
+    }
+
+    /// Turning it on puts the speakers at their safe level; turning it off leaves
+    /// both volumes where they are, so nothing gets louder.
+    @objc private func toggleOneVolume() {
+        Settings.oneVolumeControl.toggle()
+        if Settings.oneVolumeControl {
+            for display in displays where display.supports(.speakerVolume) {
+                display.set(.speakerVolume, normalized: display.speakerBase)
+            }
+        }
+        refreshControls()
+    }
+
+    @objc private func toggleNightDimming() {
+        Settings.nightDimming.toggle()
+        nightMode.reset()
+    }
+
+    @objc private func selectSchedule(_ sender: NSMenuItem) {
+        guard let value = sender.representedObject as? String, let schedule = NightSchedule(storageValue: value) else { return }
+        Settings.nightSchedule = schedule
+        nightMode.reset()
+    }
+
+    @objc private func selectInput(_ sender: NSMenuItem) {
+        guard let (displayID, code) = sender.representedObject as? (CGDirectDisplayID, UInt8),
+              let display = display(displayID),
+              code != display.currentInput else { return }
+        let alert = NSAlert()
+        alert.messageText = "Switch \(display.name) to \(MCCS.Input(code: code).name)?"
+        alert.informativeText = "The monitor will show that input instead of this Mac. Hush usually can't switch it back from here, so you may need the monitor's own buttons to return."
+        alert.addButton(withTitle: "Switch")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        display.switchInput(to: code)
     }
 
     @objc private func selectOutput(_ sender: NSMenuItem) {
@@ -291,29 +556,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Menu item builders
 
     private func header(_ text: String) -> NSMenuItem {
+        note(text, font: .boldSystemFont(ofSize: NSFont.systemFontSize))
+    }
+
+    private func caption(_ text: String) -> NSMenuItem {
+        note(text, font: .systemFont(ofSize: NSFont.smallSystemFontSize))
+    }
+
+    private func note(_ text: String, font: NSFont? = nil) -> NSMenuItem {
         let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
         item.isEnabled = false
-        item.attributedTitle = NSAttributedString(string: text, attributes: [.font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)])
+        if let font { item.attributedTitle = NSAttributedString(string: text, attributes: [.font: font]) }
         return item
     }
 
-    private func note(_ text: String) -> NSMenuItem {
-        let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
-        item.isEnabled = false
-        return item
-    }
-
-    private func sliderItem(_ slider: NSSlider, symbol: String) -> NSMenuItem {
-        let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
-        icon.contentTintColor = .secondaryLabelColor
-        let stack = NSStackView(views: [icon, slider])
-        stack.orientation = .horizontal
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 4, left: 18, bottom: 4, right: 18)
-        stack.frame = NSRect(x: 0, y: 0, width: 260, height: 30)
-        slider.widthAnchor.constraint(greaterThanOrEqualToConstant: 190).isActive = true
+    private func sliderItem(_ slider: ModuleSlider) -> NSMenuItem {
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: Self.menuWidth, height: ModuleSlider.height + 10))
+        slider.frame.origin = NSPoint(x: 16, y: 5)
+        container.addSubview(slider)
         let item = NSMenuItem()
-        item.view = stack
+        item.view = container
         return item
     }
 }

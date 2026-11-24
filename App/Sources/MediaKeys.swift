@@ -23,7 +23,8 @@ final class MediaKeys {
 
     private var tap: CFMachPort?
     private let lock = NSLock()
-    private var takesBrightness = false
+    /// Global bounds (CG coordinates, top-left origin) of the displays Hush controls over DDC.
+    private var brightnessAreas: [CGRect] = []
     private var takesVolume = false
     private var swallowedDown: Set<Key> = [] // tap thread only
 
@@ -35,8 +36,10 @@ final class MediaKeys {
     }
 
     /// Which keys to swallow and handle; the rest go on to macOS untouched.
-    func take(brightness: Bool, volume: Bool) {
-        lock.withLock { takesBrightness = brightness; takesVolume = volume }
+    /// Brightness keys are taken only while the pointer is on one of `brightnessIn`,
+    /// so on the built-in screen macOS keeps handling them.
+    func take(brightnessIn areas: [CGRect], volume: Bool) {
+        lock.withLock { brightnessAreas = areas; takesVolume = volume }
     }
 
     func start() {
@@ -100,7 +103,8 @@ final class MediaKeys {
             fine = ns.modifierFlags.contains(.shift) && ns.modifierFlags.contains(.option)
         }
         if isDown {
-            let taken = lock.withLock { key.isBrightness ? takesBrightness : takesVolume }
+            let pointer = event.location
+            let taken = lock.withLock { key.isBrightness ? brightnessAreas.contains { $0.contains(pointer) } : takesVolume }
             guard taken else { swallowedDown.remove(key); return pass }
             swallowedDown.insert(key)
             DispatchQueue.main.async { [weak self] in self?.handler?(key, fine) }

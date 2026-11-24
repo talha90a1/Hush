@@ -4,7 +4,6 @@
 #
 #   ./scripts/build.sh                    # ad-hoc signed, for local testing
 #   SIGN_ID="Developer ID Application: …" ./scripts/build.sh   # cert in the keychain
-#   ./scripts/release.sh                  # Developer ID in the cloud + notarization
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -22,7 +21,7 @@ rm -rf "$OUT/Hush.app" "$OUT/Hush.driver" "$OUT/obj"
 mkdir -p "$OUT/obj"
 
 sign() { # path
-  # Hardened runtime also when ad-hoc, so release.sh can re-sign this build as is.
+  # Hardened runtime also when ad-hoc, so the build can be re-signed for release as is.
   local args=(--force --options runtime --sign "$SIGN_ID")
   [[ "$SIGN_ID" != "-" ]] && args+=(--timestamp)
   codesign "${args[@]}" "$1"
@@ -45,7 +44,7 @@ for arch in "${ARCHS[@]}"; do
   swiftc -target "$target" -O \
     -import-objc-header App/Bridge/Hush-Bridging-Header.h \
     App/Sources/*.swift \
-    -framework AppKit -framework CoreAudio -framework IOKit -framework ServiceManagement -framework ApplicationServices \
+    -framework AppKit -framework CoreAudio -framework IOKit -framework ServiceManagement -framework ApplicationServices -framework CoreLocation \
     -o "$OUT/obj/Hush-$arch"
   BIN+=("$OUT/obj/Hush-$arch")
 done
